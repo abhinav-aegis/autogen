@@ -35,7 +35,7 @@ from autogen_core.models import (
 )
 from autogen_core.tools import BaseTool, FunctionTool
 from pydantic import BaseModel
-from typing_extensions import Self
+from typing_extensions import Self, TypeAlias
 
 from .. import EVENT_LOGGER_NAME
 from ..base import Handoff as HandoffBase
@@ -56,8 +56,10 @@ from ..state import AssistantAgentState
 from ..utils import remove_images
 from ._base_chat_agent import BaseChatAgent
 
+
 event_logger = logging.getLogger(EVENT_LOGGER_NAME)
 
+AssistantAgentMetadata: TypeAlias = Dict[str, str]
 
 class AssistantAgentConfig(BaseModel):
     """The declarative configuration for the assistant agent."""
@@ -73,6 +75,7 @@ class AssistantAgentConfig(BaseModel):
     model_client_stream: bool = False
     reflect_on_tool_use: bool
     tool_call_summary_format: str
+    metadata: Optional[AssistantAgentMetadata] = None
 
 
 class AssistantAgent(BaseChatAgent, Component[AssistantAgentConfig]):
@@ -613,6 +616,7 @@ class AssistantAgent(BaseChatAgent, Component[AssistantAgentConfig]):
         reflect_on_tool_use: bool = False,
         tool_call_summary_format: str = "{result}",
         memory: Sequence[Memory] | None = None,
+        metadata: Optional[AssistantAgentMetadata] = None,
     ):
         super().__init__(name=name, description=description)
         if reflect_on_tool_use and ModelFamily.is_claude(model_client.model_info["family"]):
@@ -692,6 +696,10 @@ class AssistantAgent(BaseChatAgent, Component[AssistantAgentConfig]):
         self._reflect_on_tool_use = reflect_on_tool_use
         self._tool_call_summary_format = tool_call_summary_format
         self._is_running = False
+
+        # Set metadata using the setter to ensure validation
+        self._metadata: Optional[Dict[str, str]] = None
+        self.metadata = metadata 
 
     @property
     def produced_message_types(self) -> Sequence[type[ChatMessage]]:
@@ -1189,6 +1197,22 @@ class AssistantAgent(BaseChatAgent, Component[AssistantAgentConfig]):
             return messages
         else:
             return remove_images(messages)
+        
+    @property
+    def metadata(self) -> AssistantAgentMetadata | None:
+        """Get the metadata dictionary."""
+        return self._metadata
+    
+    @metadata.setter
+    def metadata(self, value: Optional[AssistantAgentMetadata]) -> None:
+        """Set metadata and validate it's a dictionary of string keys and string values."""
+        if value is not None:
+            if not isinstance(value, dict):
+                raise ValueError("metadata must be a dictionary or None")
+            for k, v in value.items():
+                if not isinstance(k, str) or not isinstance(v, str):
+                    raise ValueError("All metadata keys and values must be strings")
+        self._metadata = value
 
     def _to_config(self) -> AssistantAgentConfig:
         """Convert the assistant agent to a declarative config."""
