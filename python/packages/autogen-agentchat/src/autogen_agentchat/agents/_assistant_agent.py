@@ -77,7 +77,6 @@ class AssistantAgentConfig(BaseModel):
     tool_call_summary_format: str
     metadata: Optional[AssistantAgentMetadata] = None
 
-
 class AssistantAgent(BaseChatAgent, Component[AssistantAgentConfig]):
     """An agent that provides assistance with tool use.
 
@@ -735,6 +734,7 @@ class AssistantAgent(BaseChatAgent, Component[AssistantAgentConfig]):
         model_client_stream = self._model_client_stream
         reflect_on_tool_use = self._reflect_on_tool_use
         tool_call_summary_format = self._tool_call_summary_format
+        request_metadata = self.metadata
 
         # STEP 1: Add new user/handoff messages to the model context
         await self._add_messages_to_context(
@@ -763,6 +763,7 @@ class AssistantAgent(BaseChatAgent, Component[AssistantAgentConfig]):
             handoff_tools=handoff_tools,
             agent_name=agent_name,
             cancellation_token=cancellation_token,
+            request_metadata=request_metadata,
         ):
             if isinstance(inference_output, CreateResult):
                 model_result = inference_output
@@ -852,19 +853,21 @@ class AssistantAgent(BaseChatAgent, Component[AssistantAgentConfig]):
         handoff_tools: List[BaseTool[Any, Any]],
         agent_name: str,
         cancellation_token: CancellationToken,
+        request_metatdata: Optional[AssistantAgentMetadata]
     ) -> AsyncGenerator[Union[CreateResult, ModelClientStreamingChunkEvent], None]:
         """
         Perform a model inference and yield either streaming chunk events or the final CreateResult.
         """
         all_messages = await model_context.get_messages()
         llm_messages = cls._get_compatible_context(model_client=model_client, messages=system_messages + all_messages)
+        extra_create_args = {"metadata": request_metatdata} if request_metatdata is not None else {}
 
         all_tools = tools + handoff_tools
 
         if model_client_stream:
             model_result: Optional[CreateResult] = None
             async for chunk in model_client.create_stream(
-                llm_messages, tools=all_tools, cancellation_token=cancellation_token
+                llm_messages, tools=all_tools, cancellation_token=cancellation_token, extra_create_args=extra_create_args
             ):
                 if isinstance(chunk, CreateResult):
                     model_result = chunk
@@ -877,7 +880,7 @@ class AssistantAgent(BaseChatAgent, Component[AssistantAgentConfig]):
             yield model_result
         else:
             model_result = await model_client.create(
-                llm_messages, tools=all_tools, cancellation_token=cancellation_token
+                llm_messages, tools=all_tools, cancellation_token=cancellation_token, extra_create_args=extra_create_args
             )
             yield model_result
 
